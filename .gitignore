@@ -11,4 +11,6 @@ target
 /.settings
 /RUNNING_PID
 project/project/
-public
+/public
+ui/node_modules
+app/views/index.scala.html
