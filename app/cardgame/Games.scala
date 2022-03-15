@@ -1,5 +1,6 @@
 package cardgame
 
+import java.util.UUID
 import scala.collection._
 import scala.collection.mutable.Queue
 import scala.collection.mutable.ArrayBuffer
@@ -8,18 +9,19 @@ import scala.util.Random
 import io.circe.syntax._
 import io.circe.generic.semiauto._
 import io.circe.parser.decode
-import io.circe.Decoder
-import java.util.UUID
+import io.circe.Encoder
+import play.api.Logger
 
 // https://github.com/evolution-gaming/recruitment/blob/master/backend/GameServer.md
 
-object Games {
+object GameDAO {
     val USERS_PER_GAME = 2
+    val logger: Logger = Logger(this.getClass())
 
-    val singleCardQueue: Queue[User] = new Queue[User]()
-    val games: ArrayBuffer[Game] = new ArrayBuffer[Game]()
+    private val singleCardQueue: Queue[User] = new Queue[User]()
+    private val games: ArrayBuffer[Game] = new ArrayBuffer[Game]()
 
-    def askForGame(user: User): Option[UUID] = {
+    def askForGame(user: User): Option[String] = {
         val game: Option[Game] = games
             .find(g => g.users.exists(_.login == user.login))
         game match {
@@ -28,14 +30,20 @@ object Games {
         }
     }
 
+    def find(gameId: String): Option[Game] = {
+        games.find(_.id == gameId)
+    }
+
     def addSingleCardGameUser(user: User): Option[Game] = {
         if (!singleCardQueue.exists(u => u.login == user.login)) {
             singleCardQueue.enqueue(user)
         }
+        logger.info("singleCardQueue: " + singleCardQueue)
         if (singleCardQueue.length >= USERS_PER_GAME) {
             val game = new Game((1 to USERS_PER_GAME).map(_ =>
                 singleCardQueue.dequeue()))
             games += game
+            logger.info("singleCardQueue: " + singleCardQueue)
             Some(game)
         } else {
             None
@@ -43,9 +51,10 @@ object Games {
     }
 }
 
-sealed abstract case class Action(name: String)
+sealed case class Action(name: String)
 object Play extends Action("Play")
 object Fold extends Action("Fold")
+object NoAction extends Action("")
 object Action {
     def get(text: String): Action = {
         Seq(Play, Fold).find(_.name == text).get
@@ -58,12 +67,24 @@ class PlayerTurnState(
     var card: Option[Card],
     var action: Option[Action]) {
 
+    implicit val suitEncoder: Encoder[Suit] = deriveEncoder
+    implicit val cardEncoder: Encoder[Card] = deriveEncoder
+    implicit val actionEncoder: Encoder[Action] = deriveEncoder
+    implicit val playerTurnStateEncoder: Encoder[PlayerTurnState] = 
+        Encoder.forProduct5("login", "turnIndex", "card", "action", "tokens")(p =>
+            (p.user.login, p.turnIndex, p.card.getOrElse(BlankCard), 
+             p.action.getOrElse(NoAction), p.user.tokens))
+
     def this(turnIndex: Int, user: User) = {
         this(turnIndex = turnIndex,
              user = user,
              card = None,
              action = None)
     }
+
+    def toJson: String = {
+        this.asJson.toString
+    }    
 }
 
 class Turn(
@@ -71,7 +92,7 @@ class Turn(
     val playersStates: Seq[PlayerTurnState])
 
 class Game(val users: Seq[User], 
-           val id: UUID = java.util.UUID.randomUUID,
+           val id: String = java.util.UUID.randomUUID.toString(),
            private val turnes: ArrayBuffer[Turn] = new ArrayBuffer[Turn]) {
     // Init game state
     {
@@ -84,15 +105,6 @@ class Game(val users: Seq[User],
         dealCards(firstTurn)
     }
 
-    def getState(user: User, turnIndex: Int): Option[PlayerTurnState] = {
-        val turn: Turn = turnes.last
-        if (turn.index == turnIndex) {
-            turn.playersStates.find(_.user == user)
-        } else {
-            None
-        }
-    }
-
     def calculation(turn: Turn): Unit = {
         val playersPlay: Seq[PlayerTurnState] = turn.playersStates.filter(_.action.get == Play).toSeq
         val playersFold: Seq[PlayerTurnState] = turn.playersStates.filter(_.action.get == Fold).toSeq
@@ -103,14 +115,16 @@ class Game(val users: Seq[User],
             playersPlay.head.user.tokens += 3
             playersFold.foreach(_.user.tokens += -3)
         } else {
-            val maxCard: Card = playersPlay.map(_.card.get).max            
-            playersPlay.foreach(p => 
-                if (p.card == maxCard) {
-                    p.user.tokens += 10
-                } else {
-                    p.user.tokens += -10
-                })
-            playersFold.foreach(_.user.tokens += -3)
+            val maxRank: Int = playersPlay.map(_.card.get.rank).max            
+            if (playersPlay.exists(_.card.get.rank != maxRank) && playersFold.isEmpty) {
+                playersPlay.foreach(p => 
+                    if (p.card.get.rank == maxRank) {
+                        p.user.tokens += 10
+                    } else {
+                        p.user.tokens += -10
+                    })
+                playersFold.foreach(_.user.tokens += -3)
+            }
         }
     }
 
@@ -124,20 +138,30 @@ class Game(val users: Seq[User],
         })
     }    
 
-    def userTakesAction(user: User, turnIndex: Int, action: Action): Boolean = {
+    def getState(user: User): Option[PlayerTurnState] = {
+        val turn: Turn = turnes.last
+        turn.playersStates.find(_.user.login == user.login)
+    }
+
+    def userTakesAction(
+            user: User, 
+            turnIndex: Int, 
+            action: Action): Unit = {
         val thisTurn: Turn = turnes.last
+        if (thisTurn.index == turnIndex) {
+            thisTurn.playersStates
+                .find(_.user.login == user.login)
+                .map(_.action = Some(action))
+        }
         if (!thisTurn.playersStates.exists(p => p.action.isEmpty)) {
             val turnIndex = turnes.length
             val newTurn = new Turn(
                 index = turnIndex,
                 playersStates = thisTurn.playersStates.map(p => 
                     new PlayerTurnState(turnIndex, p.user)).toSeq)
-            calculation(newTurn)            
+            calculation(thisTurn)            
             dealCards(newTurn)
             turnes += newTurn
-            true
-        } else {
-            false
-        }
+        }        
     }
 }

@@ -45,10 +45,12 @@ class ChooseGame extends React.Component {
                                     'Csrf-Token': 'nocheck'},
                          timeout: 0};
         const data = new FormData();
+        data.append('login', this.props.context.login);
         data.append('gameType', "singleCardGame");
         axios.post("/askForGame", data, config)
             .then((response) => {
                 if (response.status === 200) {
+                    this.props.context.gameId = response.data.gameId;
                     window.location.hash = "singleCardGame";
                 } else if (response.status === 204) {
                     setTimeout(this.askSingleCardGame, 2000);

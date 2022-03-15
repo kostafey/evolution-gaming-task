@@ -8,7 +8,8 @@ import play.api.data.Form
 
 import cardgame.User
 import cardgame.UserDAO
-import cardgame.Games
+import cardgame.GameDAO
+import cardgame.PlayerTurnState
 
 @Singleton
 class HomeController @Inject()(val controllerComponents: ControllerComponents) extends BaseController {
@@ -27,7 +28,7 @@ class HomeController @Inject()(val controllerComponents: ControllerComponents) e
         val login: String = userForm.login
         if (!login.isBlank()) {
             UserDAO.loginOrAdd(login) match {
-              case Some(user) => Ok.withSession("user" -> login)
+              case Some(user) => Ok(s"""{"login": "${login}"}""").as("application/json")
               case None => Unauthorized
             }
         } else {
@@ -35,40 +36,68 @@ class HomeController @Inject()(val controllerComponents: ControllerComponents) e
         }
     }
 
-    case class GameTypeForm(gameType: String)
+    case class GameTypeForm(login: String, gameType: String)
 
-    val gameTypeForm = Form(mapping("gameType" -> text)
+    val gameTypeForm = Form(mapping("login" -> text, "gameType" -> text)
       (GameTypeForm.apply)(GameTypeForm.unapply))
 
     def askForGame = Action(parse.form(gameTypeForm)) { implicit request =>
-        request.session.get("user")
-        .map { login =>
-            val user: User = UserDAO.get(login)
-            Games.askForGame(user)
+        val gameTypeForm: GameTypeForm = request.body
+        UserDAO.find(gameTypeForm.login)
+        .map(user => {
+            GameDAO.askForGame(user)
             .map(id => Ok(s"""{"gameId": "${id.toString()}"}""").as("application/json"))
             .getOrElse(NoContent)
+        })
+        .getOrElse {
+            Unauthorized
+        }
+    }
+
+    case class SubmitActionForm(login: String, gameId: String, turnIndex: Int, action: String)
+
+    val submitActionForm = Form(mapping("login" -> text, "gameId" -> text, 
+        "turnIndex" -> number, "action" -> text)
+      (SubmitActionForm.apply)(SubmitActionForm.unapply))
+
+    def submitAction() = Action(parse.form(submitActionForm)) { implicit request =>
+        val submitActionForm: SubmitActionForm = request.body
+        UserDAO.find(submitActionForm.login)
+        .map { user =>            
+            val turnIndex: Int = submitActionForm.turnIndex
+            val action: cardgame.Action = cardgame.Action.get(submitActionForm.action)
+            val state: Option[PlayerTurnState] = GameDAO
+                .find(submitActionForm.gameId)
+                .flatMap(g => {
+                    g.userTakesAction(user, turnIndex, action)
+                    g.getState(user)
+                })
+            state
+                .map(s => Ok(s.toJson).as("application/json"))
+                .getOrElse(Ok)
         }
         .getOrElse {
             Unauthorized
         }
     }
 
-    case class CheckStateForm(login: String, turn: Int)
+    case class GetStateForm(login: String, gameId: String)
 
-    val checkStateForm = Form(mapping("login" -> text, "turn" -> number)
-      (CheckStateForm.apply)(CheckStateForm.unapply))
+    val getStateForm = Form(mapping("login" -> text, "gameId" -> text)
+      (GetStateForm.apply)(GetStateForm.unapply))
 
-    def getSingleCardGameState() = Action(parse.form(checkStateForm)) {
-        implicit request =>
-        request.session.get("user")
-        .map { login =>
-            val checkStateForm: CheckStateForm = request.body
-            if (!checkStateForm.login.isBlank() && login == checkStateForm.login) {
-                // Game.getState(checkStateForm.login, checkStateForm.turn)
-                Ok("Hello " + login)
-            } else {
-                Unauthorized
-            }
+    def getGameState() = Action(parse.form(getStateForm)) { implicit request =>
+        val getStateForm: GetStateForm = request.body
+        UserDAO.find(getStateForm.login)
+        .map { user =>
+            val state: Option[PlayerTurnState] = GameDAO
+                .find(getStateForm.gameId)
+                .flatMap(g => {
+                    g.getState(user)
+                })
+            state
+                .map(s => Ok(s.toJson).as("application/json"))
+                .getOrElse(Ok)
         }
         .getOrElse {
             Unauthorized

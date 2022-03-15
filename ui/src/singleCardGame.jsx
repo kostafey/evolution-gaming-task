@@ -32,43 +32,67 @@ const styles = theme => ({
     }    
 });
 
-const cards = {
-    14: "../images/ace-of-clubs.png",   // Ace
-    13: "../images/king-of-clubs.png",  // King
-    12: "../images/queen-of-clubs.png", // Queen
-    11: "../images/jack-of-clubs.png",  // Jack
-    10: "../images/ten-of-clubs.png",   // Ten
-    9:  "../images/nine-of-clubs.png",  // Nine
-    8:  "../images/eight-of-clubs.png", // Eight
-    7:  "../images/seven-of-clubs.png", // Seven
-    6:  "../images/six-of-clubs.png",   // Six
-    5:  "../images/five-of-clubs.png",  // Five
-    4:  "../images/four-of-clubs.png",  // Four
-    3:  "../images/three-of-clubs.png", // Three
-    2:  "../images/two-of-clubs.png"    // Two
-}
-
 class SingleCardGame extends React.Component {
     constructor(props) {
         super(props);
 
         // This binding is necessary to make `this` work in the callback
+        this.play = this.play.bind(this);
+        this.fold = this.fold.bind(this);
+        this.submitAction = this.submitAction.bind(this);
         this.checkState = this.checkState.bind(this);
     }    
 
     state = {
         login: '',
         tokens: 0,
-        turn: 0,
-        action: null,
-        actionCompleted: false
+        turnIndex: 0,
+        card: {rank: 0, suit: '', imagePath: "../images/blank.png"},
+        action: ''
     }
 
-    getCardImage = (rank) => {
-        return <img width='300px' src={cards[rank]}></img>
+    getCardImage = (card) => {
+        return <img width='300px' src={card.imagePath}></img>
     }
 
-    checkState(event) {
+    play(_) {
+        this.submitAction("Play")
+    }
+
+    fold(_) {
+        this.submitAction("Fold")
+    }
+
+    submitAction(action) {
+        this.setState({ action: action });
+        const config = { headers: { 'Content-Type': 'application/json',
+                                    'X-Requested-With': 'HttpRequest',
+                                    'Csrf-Token': 'nocheck'},
+                         timeout: 0};
+        const data = new FormData();
+        data.append('login', this.props.context.login);
+        data.append('gameId', this.props.context.gameId);
+        data.append('action', action);
+        data.append('turnIndex', this.state.turnIndex);
+        axios.post("/submitAction", data, config)
+            .then((response) => {
+                if (response.status === 200) {
+                    this.setState({ login: response.data.login,
+                                    card: response.data.card,
+                                    action: response.data.action,
+                                    tokens: response.data.tokens,
+                                    turnIndex: response.data.turnIndex});
+                    if (response.data.action != '') {
+                        setTimeout(this.checkState(false), 2000);
+                    }                    
+                }
+            })
+            .catch( (error) => {
+                console.log(error);
+            });                
+    }
+
+    checkState = (init) => (event) => {
         if (event != null) {
             event.preventDefault();
         }
@@ -77,15 +101,19 @@ class SingleCardGame extends React.Component {
                                     'Csrf-Token': 'nocheck'},
                          timeout: 0};
         const data = new FormData();
-        ['login', 'turn', 'action'].forEach(f => {data[f] = this.state[f];})        
-        axios.get("/getSingleCardGameState", data, config)
+        data.append('login', this.props.context.login);
+        data.append('gameId', this.props.context.gameId);
+        axios.post("/getGameState", data, config)
             .then( (response) => {
                 if (response.status === 200) {                    
                     this.setState({ login: response.data.login,
+                                    card: response.data.card,
+                                    action: response.data.action.name,
                                     tokens: response.data.tokens,
-                                    turn: response.data.turnIndex,
-                                    actionCompleted: false});
-                    
+                                    turnIndex: response.data.turnIndex});
+                    if (!init && response.data.action != '') {
+                        setTimeout(this.checkState(false), 2000);
+                    }                    
                 } else {
                     console.log(response);
                 }
@@ -95,9 +123,12 @@ class SingleCardGame extends React.Component {
             });
     };
 
+    componentDidMount() {
+        this.checkState(true)(null);
+    }
+
     render() {
-        const { classes } = this.props;
-        // this.checkState();
+        const { classes } = this.props;        
 
         return (
             <Center className={classes.topMargin}>
@@ -112,24 +143,24 @@ class SingleCardGame extends React.Component {
                         <table className={classes.table}>
                             <tr>
                                 <td colspan="2" align='right'>
-                                    Player: {this.state.login}
+                                    Player: {this.props.context.login}
                                 </td>
                             </tr>
                             <tr>
                                 <td colspan="2" align='right'>
-                                    Score: {this.state.tokens}
+                                    Tokens: {this.state.tokens}
                                 </td>
                             </tr>
                             <tr>
                                 <td colspan="2" align='right'>
-                                    Turn: {this.state.turn}
+                                    Turn: {this.state.turnIndex}
                                 </td>
-                            </tr>                            
+                            </tr>
                             <tr>
                                 <td colspan="2">
                                     <Center>
                                         <Box component="span" m={2}>
-                                            {this.getCardImage(14)}
+                                            {this.getCardImage(this.state.card)}
                                         </Box>                                    
                                     </Center>
                                 </td>
@@ -142,7 +173,8 @@ class SingleCardGame extends React.Component {
                                         variant="contained"
                                         color="secondary"
                                         className={classes.submit}
-                                        onClick={this.checkState}>
+                                        onClick={this.play}
+                                        disabled={this.state.action != ''}>
                                         Play
                                     </Button>
                                 </td>
@@ -153,7 +185,8 @@ class SingleCardGame extends React.Component {
                                         variant="contained"
                                         color="primary"
                                         className={classes.submit}
-                                        onClick={this.doubleCardGame}>
+                                        onClick={this.fold}
+                                        disabled={this.state.action != ''}>
                                         Fold
                                     </Button>
                                 </td>                                

@@ -10,11 +10,23 @@ class Main extends React.Component {
         return (
             <HashRouter>
                 <Switch>
-                    <Route path="/login" component={Login} />
-                    <Route path="/chooseGame" component={ChooseGame} />
-                    <Route path="/singleCardGame" component={SingleCardGame} />
+                    <Route path="/login" render={(props) =>
+                      <Login {...props}
+                            context={this.context}
+                            parent={this}/>} />
+                    <Route path="/chooseGame" render={(props) =>
+                      <ChooseGame {...props}
+                            context={this.context}
+                            parent={this}/>} />
+                    <Route path="/singleCardGame" render={(props) =>
+                            <SingleCardGame {...props}
+                                  context={this.context}
+                                  parent={this}/>}/>
 
-                    <Route path="/" component={Login} />
+                    <Route path="/" render={(props) =>
+                        <Login {...props}
+                                context={this.context}
+                                parent={this}/>} />
                 </Switch>
             </HashRouter>
         );

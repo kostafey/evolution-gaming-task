@@ -78,6 +78,7 @@ class Login extends React.Component {
         axios.post("/login", data, config)
             .then( (response) => {
                 if (response.status === 200) {
+                    this.props.context.login = response.data.login;
                     this.setState({ loginFailed: false });
                     this.gotoChooseGame();
                 } else {

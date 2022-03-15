@@ -10,7 +10,11 @@ case class User(
 object UserDAO {
     private val list: ArrayBuffer[User] = new ArrayBuffer[User]()
 
-    def get(login: String): User = {
+    def find(login: String): Option[User] = {
+        list.find(u => u.login == login)
+    }
+
+    private def get(login: String): User = {
         list.find(u => u.login == login).get
     }
 
