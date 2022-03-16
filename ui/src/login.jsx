@@ -113,7 +113,7 @@ class Login extends React.Component {
                        <form className={classes.form} noValidate>
                          {this.state.loginFailed
                           ? <Alert severity="error">
-                              Authentication error. User already registered or login is empty.
+                              Authentication error. Login is empty.
                             </Alert>
                           : ""}
                          <TextField

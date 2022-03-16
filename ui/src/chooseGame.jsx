@@ -46,7 +46,7 @@ class ChooseGame extends React.Component {
                          timeout: 0};
         const data = new FormData();
         data.append('login', this.props.context.login);
-        data.append('gameType', "singleCardGame");
+        data.append('gameType', "single-card-game");
         axios.post("/askForGame", data, config)
             .then((response) => {
                 if (response.status === 200) {

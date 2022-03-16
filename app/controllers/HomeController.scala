@@ -9,6 +9,7 @@ import play.api.data.Form
 import cardgame.User
 import cardgame.UserDAO
 import cardgame.GameDAO
+import cardgame.GameType
 import cardgame.PlayerTurnState
 
 @Singleton
@@ -27,10 +28,8 @@ class HomeController @Inject()(val controllerComponents: ControllerComponents) e
         val userForm: UserForm = request.body
         val login: String = userForm.login
         if (!login.isBlank()) {
-            UserDAO.loginOrAdd(login) match {
-              case Some(user) => Ok(s"""{"login": "${login}"}""").as("application/json")
-              case None => Unauthorized
-            }
+            Ok(s"""{"login": "${UserDAO.loginOrAdd(login).login}"}""")
+                .as("application/json")
         } else {
             BadRequest
         }
@@ -45,7 +44,7 @@ class HomeController @Inject()(val controllerComponents: ControllerComponents) e
         val gameTypeForm: GameTypeForm = request.body
         UserDAO.find(gameTypeForm.login)
         .map(user => {
-            GameDAO.askForGame(user)
+            GameDAO.askForGame(user, GameType.get(gameTypeForm.gameType))
             .map(id => Ok(s"""{"gameId": "${id.toString()}"}""").as("application/json"))
             .getOrElse(NoContent)
         })
