@@ -3,6 +3,7 @@ import { Switch, Route, HashRouter } from 'react-router-dom';
 import Login from './login';
 import ChooseGame from './chooseGame';
 import SingleCardGame from './singleCardGame';
+import DoubleCardGame from './doubleCardGame';
 
 class Main extends React.Component {
 
@@ -22,6 +23,10 @@ class Main extends React.Component {
                             <SingleCardGame {...props}
                                   context={this.context}
                                   parent={this}/>}/>
+                    <Route path="/doubleCardGame" render={(props) =>
+                            <DoubleCardGame {...props}
+                                  context={this.context}
+                                  parent={this}/>}/>                                  
 
                     <Route path="/" render={(props) =>
                         <Login {...props}

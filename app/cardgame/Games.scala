@@ -13,15 +13,12 @@ import io.circe.generic.semiauto._
 import io.circe.parser.decode
 import io.circe.Encoder
 
-
 // https://github.com/evolution-gaming/recruitment/blob/master/backend/GameServer.md
 
 object GameDAO {
     val USERS_PER_GAME = 2
     private val lock  = new ReentrantReadWriteLock()
 
-    private val singleCardQueue: Queue[User] = new Queue[User]()
-    private val doubleCardQueue: Queue[User] = new Queue[User]()
     private val games: ArrayBuffer[Game] = new ArrayBuffer[Game]()
 
     def askForGame(user: User, gameType: GameType): Option[String] = {
@@ -29,14 +26,14 @@ object GameDAO {
             try {
                 lock.readLock().tryLock(10, TimeUnit.SECONDS)
                 games.find(g => {
-                    g.gameType == gameType && 
+                    g.gameType.name == gameType.name &&
                     g.users.exists(_.login == user.login)})
             } finally {
                 lock.readLock().unlock()
             }
         game match {
             case Some(g) => Some(g.id)
-            case None => addSingleCardGameUser(user, gameType).map(_.id)
+            case None => addGameUser(user, gameType).map(_.id)
         }
     }
 
@@ -49,14 +46,10 @@ object GameDAO {
         }
     }
 
-    def addSingleCardGameUser(user: User, gameType: GameType): Option[Game] = {
-        val queue = gameType match {
-            case SingleCardGame => singleCardQueue
-            case DoubleCardGame => doubleCardQueue
-            case _ => throw new Exception("Unknown game type")
-        }
+    def addGameUser(user: User, gameType: GameType): Option[Game] = {
         try {
-            lock.writeLock().tryLock(10, TimeUnit.SECONDS)            
+            lock.writeLock().tryLock(10, TimeUnit.SECONDS)
+            val queue = gameType.usersQueue
             if (!queue.exists(u => u.login == user.login)) {
                 queue.enqueue(user)
             }
@@ -67,7 +60,7 @@ object GameDAO {
                 Some(game)
             } else {
                 None
-            }            
+            }
         } finally {
             lock.writeLock().unlock()
         }
@@ -87,39 +80,119 @@ object Action {
 class PlayerTurnState(
     val turnIndex: Int,
     val user: User,
-    var card: Option[Card],
+    val cards: ArrayBuffer[Card] = new ArrayBuffer[Card](),
     @volatile var action: Option[Action]) {
 
     implicit val suitEncoder: Encoder[Suit] = deriveEncoder
     implicit val cardEncoder: Encoder[Card] = deriveEncoder
     implicit val actionEncoder: Encoder[Action] = deriveEncoder
-    implicit val playerTurnStateEncoder: Encoder[PlayerTurnState] = 
-        Encoder.forProduct5("login", "turnIndex", "card", "action", "tokens")(p =>
-            (p.user.login, p.turnIndex, p.card.getOrElse(BlankCard), 
+    implicit val playerTurnStateEncoder: Encoder[PlayerTurnState] =
+        Encoder.forProduct5("login", "turnIndex", "cards", "action", "tokens")(p =>
+            (p.user.login, p.turnIndex, p.cards,
              p.action.getOrElse(NoAction), p.user.tokens.get()))
+
+    def highest: Card = cards.sorted.last
+    def lowest: Card = cards.sorted.head
 
     def this(turnIndex: Int, user: User) = {
         this(turnIndex = turnIndex,
              user = user,
-             card = None,
              action = None)
     }
 
     def toJson: String = {
         this.asJson.toString
-    }    
+    }
 }
 
 class Turn(
     val index: Int,
     val playersStates: Seq[PlayerTurnState])
 
-sealed case class GameType(val name: String)
-object SingleCardGame extends GameType("single-card-game")
-object DoubleCardGame extends GameType("double-card-game")
+sealed abstract class GameType(
+    val name: String,
+    val cardsAmount: Int,
+    val usersQueue: Queue[User]) {
+
+    def showdownAndResults(turn: Turn): Unit
+}
 object GameType {
     def get(text: String): GameType = {
         Seq(SingleCardGame, DoubleCardGame).find(_.name == text).get
+    }
+}
+object SingleCardGame extends GameType(
+    name = "single-card-game",
+    cardsAmount = 1,
+    usersQueue = new Queue[User]()) {
+
+    val ALL_FOLD = 1
+    val SINGLE_PLAYER_PLAY = 3
+    val PLAYER_WIN_OR_LOSE = 10
+    override def showdownAndResults(turn: Turn): Unit = {
+        val playersPlay: Seq[PlayerTurnState] = turn.playersStates.filter(_.action.get == Play).toSeq
+        val playersFold: Seq[PlayerTurnState] = turn.playersStates.filter(_.action.get == Fold).toSeq
+        val allGameUsers: Seq[User] = turn.playersStates.map(_.user)
+
+        if (playersPlay.isEmpty) {
+            allGameUsers.foreach(_.tokens.addAndGet(-ALL_FOLD))
+        } else if (playersPlay.length == 1) {
+            playersPlay.head.user.tokens.addAndGet(+SINGLE_PLAYER_PLAY)
+            playersFold.foreach(_.user.tokens.addAndGet(-SINGLE_PLAYER_PLAY))
+        } else {
+            val maxRank: Int = playersPlay.map(_.highest.rank).max
+            if (playersPlay.exists(_.highest.rank != maxRank) && playersPlay.length > 1) {
+                playersPlay.foreach(p =>
+                    if (p.highest.rank == maxRank) {
+                        p.user.tokens.addAndGet(+PLAYER_WIN_OR_LOSE)
+                    } else {
+                        p.user.tokens.addAndGet(-PLAYER_WIN_OR_LOSE)
+                    })
+            }
+            playersFold.foreach(_.user.tokens.addAndGet(-3))
+        }
+    }
+}
+object DoubleCardGame extends GameType(
+    name = "double-card-game",
+    cardsAmount = 2,
+    usersQueue = new Queue[User]()) {
+
+    val ALL_FOLD = 2
+    val SINGLE_PLAYER_PLAY = 5
+    val PLAYER_WIN_OR_LOSE = 20
+    override def showdownAndResults(turn: Turn): Unit = {
+        val playersPlay: Seq[PlayerTurnState] = turn.playersStates.filter(_.action.get == Play).toSeq
+        val playersFold: Seq[PlayerTurnState] = turn.playersStates.filter(_.action.get == Fold).toSeq
+        val allGameUsers: Seq[User] = turn.playersStates.map(_.user)
+
+        if (playersPlay.isEmpty) {
+            allGameUsers.foreach(_.tokens.addAndGet(-ALL_FOLD))
+        } else if (playersPlay.length == 1) {
+            playersPlay.head.user.tokens.addAndGet(+SINGLE_PLAYER_PLAY)
+            playersFold.foreach(_.user.tokens.addAndGet(-SINGLE_PLAYER_PLAY))
+        } else {
+            val maxRankHighest: Int = playersPlay.map(_.highest.rank).max
+            if (playersPlay.count(_.highest.rank == maxRankHighest) > 1) {
+                val maxRankLowest: Int = playersPlay
+                    .filter(_.highest.rank == maxRankHighest)
+                    .map(_.lowest.rank).max
+                playersPlay.foreach(p =>
+                    if (p.highest.rank == maxRankLowest) {
+                        p.user.tokens.addAndGet(+PLAYER_WIN_OR_LOSE)
+                    } else {
+                        p.user.tokens.addAndGet(-PLAYER_WIN_OR_LOSE)
+                    })
+            } else {
+                playersPlay.foreach(p =>
+                    if (p.highest.rank == maxRankHighest) {
+                        p.user.tokens.addAndGet(+PLAYER_WIN_OR_LOSE)
+                    } else {
+                        p.user.tokens.addAndGet(-PLAYER_WIN_OR_LOSE)
+                    })
+            }
+            playersFold.foreach(_.user.tokens.addAndGet(-5))
+        }
     }
 }
 
@@ -137,38 +210,17 @@ class Game(val users: Seq[User],
         dealCards(firstTurn)
     }
 
-    def calculation(turn: Turn): Unit = {
-        val playersPlay: Seq[PlayerTurnState] = turn.playersStates.filter(_.action.get == Play).toSeq
-        val playersFold: Seq[PlayerTurnState] = turn.playersStates.filter(_.action.get == Fold).toSeq
-
-        if (playersPlay.isEmpty) {
-            users.foreach(_.tokens.addAndGet(-1))
-        } else if (playersPlay.length == 1) {
-            playersPlay.head.user.tokens.addAndGet(+3)
-            playersFold.foreach(_.user.tokens.addAndGet(-3))
-        } else {
-            val maxRank: Int = playersPlay.map(_.card.get.rank).max            
-            if (playersPlay.exists(_.card.get.rank != maxRank) && playersFold.isEmpty) {
-                playersPlay.foreach(p => 
-                    if (p.card.get.rank == maxRank) {
-                        p.user.tokens.addAndGet(+10)
-                    } else {
-                        p.user.tokens.addAndGet(-10)
-                    })
-                playersFold.foreach(_.user.tokens.addAndGet(-3))
-            }
-        }
-    }
-
     def dealCards(turn: Turn): Unit = {
         val currentDeck: mutable.Set[Card] = new mutable.HashSet() ++ Cards.cardDeck
         val random = new Random
-        turn.playersStates.foreach(p => {
-            val newCard: Card = currentDeck.toSeq(random.nextInt(currentDeck.size))
-            currentDeck -= newCard
-            p.card = Some(newCard)
-        })
-    }    
+        (1 to gameType.cardsAmount).foreach(i =>
+            turn.playersStates.foreach(p => {
+                val newCard: Card = currentDeck.toSeq(random.nextInt(currentDeck.size))
+                currentDeck -= newCard
+                p.cards += newCard
+            })
+        )
+    }
 
     def getState(user: User): Option[PlayerTurnState] = {
         val turn: Turn = turnes.last
@@ -176,8 +228,8 @@ class Game(val users: Seq[User],
     }
 
     def userTakesAction(
-            user: User, 
-            turnIndex: Int, 
+            user: User,
+            turnIndex: Int,
             action: Action): Unit = {
         val thisTurn: Turn = turnes.last
         if (thisTurn.index == turnIndex) {
@@ -189,11 +241,11 @@ class Game(val users: Seq[User],
             val turnIndex = turnes.length
             val newTurn = new Turn(
                 index = turnIndex,
-                playersStates = thisTurn.playersStates.map(p => 
+                playersStates = thisTurn.playersStates.map(p =>
                     new PlayerTurnState(turnIndex, p.user)).toSeq)
-            calculation(thisTurn)            
+            gameType.showdownAndResults(thisTurn)
             dealCards(newTurn)
             turnes += newTurn
-        }        
+        }
     }
 }

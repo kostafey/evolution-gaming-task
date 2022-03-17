@@ -32,7 +32,7 @@ const styles = theme => ({
     }    
 });
 
-class SingleCardGame extends React.Component {
+class DoubleCardGame extends React.Component {
     constructor(props) {
         super(props);
 
@@ -42,17 +42,19 @@ class SingleCardGame extends React.Component {
         this.submitAction = this.submitAction.bind(this);
         this.checkState = this.checkState.bind(this);
     }    
+    blank = [{rank: 0, suit: '', imagePath: "../images/blank.png"},
+             {rank: 0, suit: '', imagePath: "../images/blank.png"}];
 
     state = {
         login: '',
         tokens: 0,
         turnIndex: 0,
-        card: {rank: 0, suit: '', imagePath: "../images/blank.png"},
+        cards: this.blank,
         action: ''
     }
 
     getCardImage = (card) => {
-        return <img width='300px' src={card.imagePath}></img>
+        return <img width='150px' src={card.imagePath}></img>
     }
 
     play(_) {
@@ -78,9 +80,9 @@ class SingleCardGame extends React.Component {
             .then((response) => {
                 if (response.status === 200) {
                     this.setState({ login: response.data.login,
-                                    card: (response.data.cards.length > 0)
-                                        ? response.data.cards[0]
-                                        : {rank: 0, suit: '', imagePath: "../images/blank.png"},
+                                    cards: (response.data.cards.length === 2)
+                                        ? response.data.cards
+                                        : this.blank,
                                     action: response.data.action,
                                     tokens: response.data.tokens,
                                     turnIndex: response.data.turnIndex});
@@ -109,9 +111,9 @@ class SingleCardGame extends React.Component {
             .then( (response) => {
                 if (response.status === 200) {                    
                     this.setState({ login: response.data.login,
-                                    card: (response.data.cards.length > 0)
-                                        ? response.data.cards[0]
-                                        : {rank: 0, suit: '', imagePath: "../images/blank.png"},
+                                    cards: (response.data.cards.length === 2)
+                                        ? response.data.cards
+                                        : this.blank,
                                     action: response.data.action.name,
                                     tokens: response.data.tokens,
                                     turnIndex: response.data.turnIndex});
@@ -141,7 +143,7 @@ class SingleCardGame extends React.Component {
                         <Container component="main" maxWidth="xs">
                         <Center>
                             <Typography id="1" variant="h5" component="h2">
-                                Single Card Game
+                                Double Card Game
                             </Typography>
                         </Center>
                         <table className={classes.table}>
@@ -164,8 +166,9 @@ class SingleCardGame extends React.Component {
                                 <td colspan="2">
                                     <Center>
                                         <Box component="span" m={2}>
-                                            {this.getCardImage(this.state.card)}
-                                        </Box>                                    
+                                            {this.getCardImage(this.state.cards[0])}
+                                            {this.getCardImage(this.state.cards[1])}
+                                        </Box>
                                     </Center>
                                 </td>
                             </tr>
@@ -203,4 +206,4 @@ class SingleCardGame extends React.Component {
     }
 }
 
-export default withStyles(styles)(SingleCardGame);
+export default withStyles(styles)(DoubleCardGame);

@@ -32,33 +32,48 @@ class ChooseGame extends React.Component {
         super(props);
         // This binding is necessary to make `this` work in the callback
         this.askSingleCardGame = this.askSingleCardGame.bind(this);
+        this.askDoubleCardGame = this.askDoubleCardGame.bind(this);
     }
 
     state = {
-        singleCardGameSelected: false
+        singleCardGameSelected: false,
+        doubleCardGameSelected: false
     }
 
-    askSingleCardGame(_) {
+    askSingleCardGame(_) {        
         this.setState({ singleCardGameSelected: true});
-        const config = { headers: { 'Content-Type': 'application/json',
-                                    'X-Requested-With': 'HttpRequest',
-                                    'Csrf-Token': 'nocheck'},
-                         timeout: 0};
-        const data = new FormData();
-        data.append('login', this.props.context.login);
-        data.append('gameType', "single-card-game");
-        axios.post("/askForGame", data, config)
-            .then((response) => {
-                if (response.status === 200) {
-                    this.props.context.gameId = response.data.gameId;
-                    window.location.hash = "singleCardGame";
-                } else if (response.status === 204) {
-                    setTimeout(this.askSingleCardGame, 2000);
-                }
-            })
-            .catch( (error) => {
-                console.log(error);
-            });        
+        this.askForGame("single-card-game", "singleCardGame");
+    }
+
+    askDoubleCardGame(_) {        
+        this.setState({ doubleCardGameSelected: true});
+        this.askForGame("double-card-game", "doubleCardGame");
+    }
+
+    askForGame(gameType, redirectTo) {
+        {
+            const config = { headers: { 'Content-Type': 'application/json',
+                                        'X-Requested-With': 'HttpRequest',
+                                        'Csrf-Token': 'nocheck'},
+                             timeout: 0};
+            const data = new FormData();
+            data.append('login', this.props.context.login);
+            data.append('gameType', gameType);
+            axios.post("/askForGame", data, config)
+                .then((response) => {
+                    if (response.status === 200) {
+                        this.props.context.gameId = response.data.gameId;
+                        window.location.hash = redirectTo;
+                    } else if (response.status === 204) {
+                        setTimeout(() => 
+                                this.askForGame(gameType, redirectTo), 
+                            2000);
+                    }
+                })
+                .catch( (error) => {
+                    console.log(error);
+                });        
+        }
     }
 
     render() {
@@ -89,8 +104,9 @@ class ChooseGame extends React.Component {
                            fullWidth
                            variant="contained"
                            color="primary"
-                           className={classes.submit}
-                           onClick={this.doubleCardGame}>
+                           className={classes.submit}                           
+                           onClick={this.askDoubleCardGame}
+                           disabled={this.state.doubleCardGameSelected}>
                            Double card game
                          </Button>
                         </Container>
