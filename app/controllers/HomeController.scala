@@ -6,6 +6,8 @@ import play.api.mvc._
 import play.api.data.Forms._
 import play.api.data.Form
 
+import io.circe._, io.circe.syntax._
+
 import cardgame.User
 import cardgame.UserDAO
 import cardgame.GameDAO
@@ -102,4 +104,22 @@ class HomeController @Inject()(val controllerComponents: ControllerComponents) e
             Unauthorized
         }
     }
+
+    def getSummary() = Action(parse.form(getStateForm)) { implicit request =>
+        val getStateForm: GetStateForm = request.body
+        UserDAO.find(getStateForm.login)
+        .map { user =>
+            val summary = GameDAO
+                .find(getStateForm.gameId)
+                .map(g => {
+                    g.getSummary.toSeq
+                })
+            summary
+                .map(s => Ok(s.asJson.toString).as("application/json"))
+                .getOrElse(Ok)
+        }
+        .getOrElse {
+            Unauthorized
+        }
+    }    
 }

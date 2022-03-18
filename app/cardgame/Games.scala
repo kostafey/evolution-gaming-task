@@ -3,7 +3,6 @@ package cardgame
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.locks.ReentrantReadWriteLock
-import scala.collection._
 import scala.collection.mutable.Queue
 import scala.collection.mutable.ArrayBuffer
 import scala.util.Random
@@ -12,6 +11,7 @@ import io.circe.syntax._
 import io.circe.generic.semiauto._
 import io.circe.parser.decode
 import io.circe.Encoder
+import io.circe.Json
 
 // https://github.com/evolution-gaming/recruitment/blob/master/backend/GameServer.md
 
@@ -25,9 +25,10 @@ object GameDAO {
         val game: Option[Game] =
             try {
                 lock.readLock().tryLock(10, TimeUnit.SECONDS)
-                games.find(g => {
-                    g.gameType.name == gameType.name &&
-                    g.users.exists(_.login == user.login)})
+                games.filter(!_.isFinished)
+                     .find(g => {
+                        g.gameType.name == gameType.name &&
+                        g.users.exists(_.login == user.login)})
             } finally {
                 lock.readLock().unlock()
             }
@@ -70,10 +71,11 @@ object GameDAO {
 sealed case class Action(val name: String)
 object Play extends Action("Play")
 object Fold extends Action("Fold")
+object Finish extends Action("Finish")
 object NoAction extends Action("")
 object Action {
     def get(text: String): Action = {
-        Seq(Play, Fold).find(_.name == text).get
+        Seq(Play, Fold, Finish).find(_.name == text).get
     }
 }
 
@@ -81,15 +83,8 @@ class PlayerTurnState(
     val turnIndex: Int,
     val user: User,
     val cards: ArrayBuffer[Card] = new ArrayBuffer[Card](),
-    @volatile var action: Option[Action]) {
-
-    implicit val suitEncoder: Encoder[Suit] = deriveEncoder
-    implicit val cardEncoder: Encoder[Card] = deriveEncoder
-    implicit val actionEncoder: Encoder[Action] = deriveEncoder
-    implicit val playerTurnStateEncoder: Encoder[PlayerTurnState] =
-        Encoder.forProduct5("login", "turnIndex", "cards", "action", "tokens")(p =>
-            (p.user.login, p.turnIndex, p.cards,
-             p.action.getOrElse(NoAction), p.user.tokens.get()))
+    @volatile var action: Option[Action],
+    @volatile var isLast: Boolean = false) {    
 
     def highest: Card = cards.sorted.last
     def lowest: Card = cards.sorted.head
@@ -103,6 +98,27 @@ class PlayerTurnState(
     def toJson: String = {
         this.asJson.toString
     }
+}
+object PlayerTurnState {
+    implicit val suitEncoder: Encoder[Suit] = deriveEncoder
+    implicit val cardEncoder: Encoder[Card] = deriveEncoder
+    implicit val actionEncoder: Encoder[Action] = deriveEncoder
+    implicit val playerTurnStateEncoder: Encoder[PlayerTurnState] =
+        Encoder.forProduct6("login", "turnIndex", "isLast", "cards", "action", "tokens")(p =>
+            (p.user.login, p.turnIndex, p.isLast, p.cards,
+             p.action.getOrElse(NoAction), p.user.tokens.get()))
+    implicit val playerTurnStateSeqEncoder: Encoder[Seq[PlayerTurnState]] = 
+        new Encoder[Seq[PlayerTurnState]] {
+        final def apply(a: Seq[PlayerTurnState]): Json = {
+            Json.arr(a.map(_.asJson):_*)
+        }
+    }
+    implicit val playerTurnStateSeqOfSeqEncoder: Encoder[Seq[Seq[PlayerTurnState]]] = 
+        new Encoder[Seq[Seq[PlayerTurnState]]] {
+        final def apply(a: Seq[Seq[PlayerTurnState]]): Json = {
+            Json.arr(a.map(_.asJson):_*)
+        }
+    }             
 }
 
 class Turn(
@@ -208,10 +224,15 @@ class Game(val users: Seq[User],
             playersStates = users.map(p => new PlayerTurnState(turnIndex, p)))
         turnes += firstTurn
         dealCards(firstTurn)
+    }    
+
+    def isFinished: Boolean = {
+        turnes.exists(_.playersStates.exists(_.isLast))
     }
 
     def dealCards(turn: Turn): Unit = {
-        val currentDeck: mutable.Set[Card] = new mutable.HashSet() ++ Cards.cardDeck
+        val currentDeck: scala.collection.mutable.Set[Card] = 
+            new scala.collection.mutable.HashSet() ++ Cards.cardDeck
         val random = new Random
         (1 to gameType.cardsAmount).foreach(i =>
             turn.playersStates.foreach(p => {
@@ -227,17 +248,24 @@ class Game(val users: Seq[User],
         turn.playersStates.find(_.user.login == user.login)
     }
 
+    def getSummary: ArrayBuffer[Seq[PlayerTurnState]] = {
+        turnes.map(_.playersStates)
+    }    
+
     def userTakesAction(
             user: User,
             turnIndex: Int,
             action: Action): Unit = {
         val thisTurn: Turn = turnes.last
+        if (action == Finish) {
+            thisTurn.playersStates.map(_.isLast = true)
+        }
         if (thisTurn.index == turnIndex) {
             thisTurn.playersStates
                 .find(_.user.login == user.login)
                 .map(_.action = Some(action))
         }
-        if (!thisTurn.playersStates.exists(p => p.action.isEmpty)) {
+        if (!thisTurn.playersStates.exists(p => p.action.isEmpty) && !isFinished) {
             val turnIndex = turnes.length
             val newTurn = new Turn(
                 index = turnIndex,

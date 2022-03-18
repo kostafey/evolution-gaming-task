@@ -9,6 +9,7 @@ import Center from 'react-center';
 import Container from '@material-ui/core/Container';
 import Typography from '@material-ui/core/Typography';
 import axios from 'axios';
+import AlertDialog from './alertDialog';
 
 const styles = theme => ({
     paper: {
@@ -29,7 +30,7 @@ const styles = theme => ({
     },
     table: {
         width: '100%'
-    }    
+    }
 });
 
 class SingleCardGame extends React.Component {
@@ -39,16 +40,21 @@ class SingleCardGame extends React.Component {
         // This binding is necessary to make `this` work in the callback
         this.play = this.play.bind(this);
         this.fold = this.fold.bind(this);
+        this.finish = this.finish.bind(this);
         this.submitAction = this.submitAction.bind(this);
         this.checkState = this.checkState.bind(this);
-    }    
+        this.getSummary = this.getSummary.bind(this);
+    }
 
     state = {
         login: '',
         tokens: 0,
         turnIndex: 0,
         card: {rank: 0, suit: '', imagePath: "../images/blank.png"},
-        action: ''
+        action: '',
+        isLast: false,
+        showFinishGameDialog: false,
+        summary: ''
     }
 
     getCardImage = (card) => {
@@ -61,6 +67,14 @@ class SingleCardGame extends React.Component {
 
     fold(_) {
         this.submitAction("Fold")
+    }
+
+    finish(_) {
+        this.submitAction("Finish")
+    }
+
+    gotoChooseGame() {
+        window.location.hash = "chooseGame";
     }
 
     submitAction(action) {
@@ -83,18 +97,19 @@ class SingleCardGame extends React.Component {
                                         : {rank: 0, suit: '', imagePath: "../images/blank.png"},
                                     action: response.data.action,
                                     tokens: response.data.tokens,
-                                    turnIndex: response.data.turnIndex});
+                                    turnIndex: response.data.turnIndex,
+                                    isLast: response.data.isLast});
                     if (response.data.action != '') {
-                        setTimeout(this.checkState(false), 2000);
-                    }                    
+                        setTimeout(this.checkState, 2000);
+                    }
                 }
             })
             .catch( (error) => {
                 console.log(error);
-            });                
+            });
     }
 
-    checkState = (init) => (event) => {
+    checkState(event) {
         if (event != null) {
             event.preventDefault();
         }
@@ -107,17 +122,43 @@ class SingleCardGame extends React.Component {
         data.append('gameId', this.props.context.gameId);
         axios.post("/getGameState", data, config)
             .then( (response) => {
-                if (response.status === 200) {                    
+                if (response.status === 200) {
                     this.setState({ login: response.data.login,
                                     card: (response.data.cards.length > 0)
                                         ? response.data.cards[0]
                                         : {rank: 0, suit: '', imagePath: "../images/blank.png"},
                                     action: response.data.action.name,
                                     tokens: response.data.tokens,
-                                    turnIndex: response.data.turnIndex});
-                    if (!init && response.data.action != '') {
-                        setTimeout(this.checkState(false), 2000);
-                    }                    
+                                    turnIndex: response.data.turnIndex,
+                                    isLast: response.data.isLast});
+                    if (response.data.action != '' && !response.data.isLast) {
+                        setTimeout(this.checkState, 2000);
+                    }
+                    if (response.data.isLast) {
+                        this.getSummary()
+                        this.setState({showFinishGameDialog: true });
+                    }
+                } else {
+                    console.log(response);
+                }
+            })
+            .catch( (error) => {
+                console.log(error);
+            });
+    };
+
+    getSummary() {
+        const config = { headers: { 'Content-Type': 'application/json',
+                                    'X-Requested-With': 'HttpRequest',
+                                    'Csrf-Token': 'nocheck'},
+                         timeout: 0};
+        const data = new FormData();
+        data.append('login', this.props.context.login);
+        data.append('gameId', this.props.context.gameId);
+        axios.post("/getSummary", data, config)
+            .then( (response) => {
+                if (response.status === 200) {
+                    this.setState({ summary: JSON.stringify(response.data)});
                 } else {
                     console.log(response);
                 }
@@ -128,16 +169,24 @@ class SingleCardGame extends React.Component {
     };
 
     componentDidMount() {
-        this.checkState(true)(null);
+        this.checkState(null);
     }
 
     render() {
-        const { classes } = this.props;        
+        const { classes } = this.props;
 
         return (
-            <Center className={classes.topMargin}>
+            (this.state.isLast && this.state.showFinishGameDialog)
+            ? <AlertDialog
+                     open={true}
+                     propertyName='showFinishGameDialog'
+                     handler={this.gotoChooseGame}
+                     parent={this}
+                     title="Game finished"
+                     message={this.state.summary}/>
+            : <Center className={classes.topMargin}>
                 <Card className={classes.card}>
-                    <CardContent>                        
+                    <CardContent>
                         <Container component="main" maxWidth="xs">
                         <Center>
                             <Typography id="1" variant="h5" component="h2">
@@ -165,7 +214,7 @@ class SingleCardGame extends React.Component {
                                     <Center>
                                         <Box component="span" m={2}>
                                             {this.getCardImage(this.state.card)}
-                                        </Box>                                    
+                                        </Box>
                                     </Center>
                                 </td>
                             </tr>
@@ -193,7 +242,20 @@ class SingleCardGame extends React.Component {
                                         disabled={this.state.action != ''}>
                                         Fold
                                     </Button>
-                                </td>                                
+                                </td>
+                            </tr>
+                            <tr>
+                                <td colspan="2">
+                                    <Button
+                                        type="submit"
+                                        fullWidth
+                                        variant="contained"
+                                        className={classes.submit}
+                                        onClick={this.finish}
+                                        disabled={this.state.action != ''}>
+                                        Finish
+                                    </Button>
+                                </td>
                             </tr>
                         </table>
                         </Container>
